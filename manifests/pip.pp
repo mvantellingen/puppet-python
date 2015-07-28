@@ -22,6 +22,9 @@
 # [*owner*]
 #  The owner of the virtualenv being manipulated. Default: root
 #
+# [*index*]
+#  The package index to use. Default: none
+#
 # [*proxy*]
 #  Proxy server to use for outbound connections. Default: none
 #
@@ -63,6 +66,7 @@ define python::pip (
   $virtualenv      = 'system',
   $url             = false,
   $owner           = 'root',
+  $index           = undef,
   $proxy           = false,
   $egg             = false,
   $editable        = false,
@@ -111,6 +115,13 @@ define python::pip (
     $install_editable = ''
   }
 
+  if $index {
+      $index_flag = "--index ${index}"
+  }
+  else {
+      $index_flag = ''
+  }
+
   #TODO: Do more robust argument checking, but below is a start
   if ($ensure == absent) and ($install_args != '') {
     fail('python::pip cannot provide install_args with ensure => absent')
@@ -122,7 +133,7 @@ define python::pip (
 
   # Check if searching by explicit version.
   if $ensure =~ /^((19|20)[0-9][0-9]-(0[1-9]|1[1-2])-([0-2][1-9]|3[0-1])|[0-9]+\.[0-9]+(\.[0-9]+)?)$/ {
-    $grep_regex = "^${pkgname}==${ensure}\$"
+    $grep_regex = "^${pkgname} (${ensure})\$"
   } else {
     $grep_regex = $pkgname ? {
       /==/    => "^${pkgname}\$",
@@ -142,26 +153,13 @@ define python::pip (
     default             => "${url}#egg=${egg_name}",
   }
 
-  # We need to jump through hoops to make sure we issue the correct pip command
-  # depending on wheel support and versions.
-  #
-  # Pip does not support wheels prior to version 1.4.0
-  # Pip wheels require setuptools/distribute > 0.8
-  # Python 2.6 and older does not support setuptools/distribute > 0.8
-  # Pip >= 1.5 tries to use wheels by default, even if wheel package is not
-  # installed, in this case the --no-use-wheel flag needs to be passed
-  # Versions prior to 1.5 don't support the --no-use-wheel flag
-  #
-  # To check for this we test for wheel parameter using help and then using
-  # version, this makes sure we only use wheels if they are supported and
-  # installed
-
+  # We assume that pip supports wheels..
   # Explicit version out of VCS when PIP supported URL is provided
   if $source =~ /^(git\+|hg\+|bzr\+|svn\+)(http|https|ssh|svn|sftp|ftp|lp)(:\/\/).+$/ {
       if $ensure != present and $ensure != latest {
         exec { "pip_install_${name}":
-          command     => "${pip_env} wheel --help > /dev/null 2>&1 && { ${pip_env} wheel --version > /dev/null 2>&1 || wheel_support_flag='--no-use-wheel'; } ; { ${pip_env} --log ${log}/pip.log install ${install_args} \$wheel_support_flag ${proxy_flag} ${install_args} ${install_editable} ${source}@${ensure}#egg=${egg_name} || ${pip_env} --log ${log}/pip.log install ${install_args} ${proxy_flag} ${install_args} ${install_editable} ${source}@${ensure}#egg=${egg_name} ;}",
-          unless      => "${pip_env} freeze | grep -i -e ${grep_regex}",
+          command     => "${pip_env} --log ${log}/pip.log install ${index_flag} ${install_args} ${proxy_flag} ${index_flag} ${install_args} ${install_editable} ${source}@${ensure}#egg=${egg_name}",
+          unless      => "${pip_env} list | grep -i -e '${grep_regex}'",
           user        => $owner,
           cwd         => $cwd,
           environment => $environment,
@@ -171,8 +169,8 @@ define python::pip (
         }
     else {
           exec { "pip_install_${name}":
-            command     => "${pip_env} wheel --help > /dev/null 2>&1 && { ${pip_env} wheel --version > /dev/null 2>&1 || wheel_support_flag='--no-use-wheel'; } ; { ${pip_env} --log ${log}/pip.log install ${install_args} \$wheel_support_flag ${proxy_flag} ${install_args} ${install_editable} ${source} || ${pip_env} --log ${log}/pip.log install ${install_args} ${proxy_flag} ${install_args} ${install_editable} ${source} ;}",
-            unless      => "${pip_env} freeze | grep -i -e ${grep_regex}",
+            command     => "${pip_env} --log ${log}/pip.log install ${index_flag} ${install_args} ${proxy_flag} ${install_args} ${install_editable} ${source}",
+            unless      => "${pip_env} list | grep -i -e '${grep_regex}'",
             user        => $owner,
             cwd         => $cwd,
             environment => $environment,
@@ -187,8 +185,8 @@ define python::pip (
         # Version formats as per http://guide.python-distribute.org/specification.html#standard-versioning-schemes
         # Explicit version.
         exec { "pip_install_${name}":
-          command     => "${pip_env} wheel --help > /dev/null 2>&1 && { ${pip_env} wheel --version > /dev/null 2>&1 || wheel_support_flag='--no-use-wheel'; } ; { ${pip_env} --log ${log}/pip.log install ${install_args} \$wheel_support_flag ${proxy_flag} ${install_args} ${install_editable} ${source}==${ensure} || ${pip_env} --log ${log}/pip.log install ${install_args} ${proxy_flag} ${install_args} ${install_editable} ${source}==${ensure} ;}",
-          unless      => "${pip_env} freeze | grep -i -e ${grep_regex}",
+          command     => "${pip_env} --log ${log}/pip.log install ${install_args} ${proxy_flag} ${index_flag} ${install_args} ${install_editable} ${source}==${ensure}",
+          unless      => "${pip_env} list | grep -i -e '${grep_regex}'",
           user        => $owner,
           cwd         => $cwd,
           environment => $environment,
@@ -200,8 +198,8 @@ define python::pip (
       present: {
         # Whatever version is available.
         exec { "pip_install_${name}":
-          command     => "${pip_env} wheel --help > /dev/null 2>&1 && { ${pip_env} wheel --version > /dev/null 2>&1 || wheel_support_flag='--no-use-wheel'; } ; { ${pip_env} --log ${log}/pip.log install \$wheel_support_flag ${proxy_flag} ${install_args} ${install_editable} ${source} || ${pip_env} --log ${log}/pip.log install ${proxy_flag} ${install_args} ${install_editable} ${source} ;}",
-          unless      => "${pip_env} freeze | grep -i -e ${grep_regex}",
+          command     => "${pip_env} --log ${log}/pip.log install ${proxy_flag} ${install_args} ${install_editable} ${source}",
+          unless      => "${pip_env} list | grep -i -e '${grep_regex}'",
           user        => $owner,
           cwd         => $cwd,
           environment => $environment,
@@ -213,8 +211,8 @@ define python::pip (
       latest: {
         # Latest version.
         exec { "pip_install_${name}":
-          command     => "${pip_env} wheel --help > /dev/null 2>&1 && { ${pip_env} wheel --version > /dev/null 2>&1 || wheel_support_flag='--no-use-wheel'; } ; { ${pip_env} --log ${log}/pip.log install --upgrade \$wheel_support_flag ${proxy_flag} ${install_args} ${install_editable} ${source} || ${pip_env} --log ${log}/pip.log install --upgrade ${proxy_flag} ${install_args} ${install_editable} ${source} ;}",
-          unless      => "${pip_env} search ${proxy_flag} ${source} | grep -i INSTALLED | grep -i latest",
+          command     => "${pip_env} --log ${log}/pip.log install --upgrade ${proxy_flag} ${install_args} ${install_editable} ${index_flag} ${source}",
+          onlyif      => "${pip_env} list --outdated ${proxy_flag} ${index_flag} | grep '^${source} '",
           user        => $owner,
           cwd         => $cwd,
           environment => $environment,
@@ -227,7 +225,7 @@ define python::pip (
         # Anti-action, uninstall.
         exec { "pip_uninstall_${name}":
           command     => "echo y | ${pip_env} uninstall ${uninstall_args} ${proxy_flag}",
-          onlyif      => "${pip_env} freeze | grep -i -e ${grep_regex}",
+          onlyif      => "${pip_env} list | grep -i -e '${grep_regex}'",
           user        => $owner,
           cwd         => $cwd,
           environment => $environment,
