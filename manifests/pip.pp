@@ -212,7 +212,7 @@ define python::pip (
         # Latest version.
         exec { "pip_install_${name}":
           command     => "${pip_env} --log ${log}/pip.log install --upgrade ${proxy_flag} ${install_args} ${install_editable} ${index_flag} ${source}",
-          onlyif      => "${pip_env} list --outdated ${proxy_flag} ${index_flag} | grep '^${source} '",
+		  unless      => "${pip_env} list --uptodate ${proxy_flag} ${index_flag} | grep '^${source} '",
           user        => $owner,
           cwd         => $cwd,
           environment => $environment,
